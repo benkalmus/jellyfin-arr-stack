@@ -1,0 +1,380 @@
+services:
+  jellyfin:
+    container_name: jellyfin
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    networks:
+      - arr-net
+    volumes:
+      - ./config:/config
+      - /mnt/jellyfinmedia:/windows:rw
+      - /opt/jellyfin:/data
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    environment:
+      - TZ=Europe/London
+      - JELLYFIN_PublishedServerUrl=https://optiplexjf.tailf51ed0.ts.net
+    group_add:
+      - 992
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  tailscale:
+    container_name: tailscale-jellyfin
+    image: tailscale/tailscale:latest
+    hostname: optiplexjf
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_AUTH_ONCE=true
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_HOSTNAME=optiplexjf
+      - TS_USERSPACE=false
+    volumes:
+      - ./tailscale/state:/var/lib/tailscale
+      - ./tailscale/config:/config
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    networks:
+      - arr-net
+    restart: unless-stopped
+    depends_on:
+      jellyfin:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  jellyseerr:
+    container_name: jellyseerr
+    image: ghcr.io/seerr-team/seerr:latest
+    init: true
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Europe/London
+      - PORT=5055
+    ports:
+      - "5055:5055"
+    volumes:
+      - ./jellyseerr/config:/app/config
+    networks:
+      - arr-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -q --spider http://localhost:5055/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  tailscale-jellyseerr:
+    container_name: tailscale-jellyseerr
+    profiles: ["seerr", "all"]
+    image: tailscale/tailscale:latest
+    hostname: seerr
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY_JELLYSEERR}
+      - TS_AUTH_ONCE=true
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_HOSTNAME=seerr
+      - TS_USERSPACE=false
+    volumes:
+      - ./tailscale-jellyseerr/state:/var/lib/tailscale
+      - ./tailscale-jellyseerr/config:/config
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    networks:
+      - arr-net
+    restart: unless-stopped
+    depends_on:
+      jellyseerr:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    command: >
+      sh -c "sleep 10 && /usr/local/bin/containerboot"
+
+  radarr:
+    container_name: radarr
+    image: lscr.io/linuxserver/radarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+    ports:
+      - "7878:7878"
+    volumes:
+      - ./radarr/config:/config
+      - /opt/jellyfin:/data
+    networks:
+      - arr-net
+    restart: unless-stopped
+
+  sonarr:
+    container_name: sonarr
+    image: lscr.io/linuxserver/sonarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+    ports:
+      - "8989:8989"
+    volumes:
+      - ./sonarr/config:/config
+      - /opt/jellyfin:/data
+    networks:
+      - arr-net
+    restart: unless-stopped
+
+  flaresolverr:
+    container_name: flaresolverr
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    ports:
+      - "8191:8191"
+    environment:
+      - LOG_LEVEL=info
+    networks:
+      - arr-net
+    restart: unless-stopped
+
+  prowlarr:
+    container_name: prowlarr
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+    ports:
+      - "9696:9696"
+    volumes:
+      - ./prowlarr/config:/config
+    networks:
+      - arr-net
+    restart: unless-stopped
+    depends_on:
+      - flaresolverr
+
+  qbittorrent:
+    container_name: qbittorrent
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - WEBUI_PORT=8090
+    ports:
+      - "8090:8090"
+      - "6881:6881"
+      - "6881:6881/udp"
+    volumes:
+      - ./qbittorrent/config:/config
+      - /opt/jellyfin:/data
+    networks:
+      - arr-net
+    restart: unless-stopped
+
+  lidarr:
+    container_name: lidarr
+    image: ghcr.io/hotio/lidarr:pr-plugins-3.1.2.4913
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+    ports:
+      - "8686:8686"
+    volumes:
+      - ./lidarr/config:/config
+      - /opt/jellyfin:/data
+    networks:
+      - arr-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -q --spider http://localhost:8686/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  slskd:
+    image: slskd/slskd:latest
+    volumes:
+      - ./slskd/config:/app
+      - /opt/jellyfin:/data
+      - ./scripts/slskd-entrypoint.sh:/slskd-entrypoint.sh:ro
+    ports:
+      - "5030:5030"
+      - "5031:5031"
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=false
+      - SLSKD_API_KEY=${SLSKD_API_KEY}
+      - SLSKD_USERNAME=${SLSKD_USERNAME}
+      - SLSKD_SOULSEEK_PASS=${SLSKD_SOULSEEK_PASS}
+      - SLSKD_WEB_PASSWORD=${SLSKD_WEB_PASSWORD}
+    entrypoint: ["/slskd-entrypoint.sh"]
+    networks:
+      - arr-net
+    restart: unless-stopped
+
+  navidrome:
+    container_name: navidrome
+    image: deluan/navidrome:latest
+    environment:
+      - ND_SCANSCHEDULE=1h
+      - ND_LOGLEVEL=info
+      - ND_SESSIONTIMEOUT=24h
+      - ND_ENABLETRANSCODINGCONFIG=true
+      - ND_TRANSCODINGBITRATE=128
+      - ND_LASTFM_APIKEY=${LASTFM_APIKEY}
+      - ND_LASTFM_SECRET=${LASTFM_SECRET}
+    ports:
+      - "4533:4533"
+    volumes:
+      - ./navidrome/config:/data/navidrome
+      - /opt/jellyfin:/data
+    networks:
+      - arr-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -q --spider http://localhost:4533/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  tailscale-navidrome:
+    container_name: tailscale-navidrome
+    profiles: ["navidrome", "all"]
+    image: tailscale/tailscale:latest
+    hostname: music
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY_NAVIDROME}
+      - TS_AUTH_ONCE=true
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_HOSTNAME=music
+      - TS_USERSPACE=false
+    volumes:
+      - ./tailscale-navidrome/state:/var/lib/tailscale
+      - ./tailscale-navidrome/config:/config
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    networks:
+      - arr-net
+    restart: unless-stopped
+    depends_on:
+      navidrome:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    command: >
+      sh -c "sleep 10 && /usr/local/bin/containerboot"
+
+  aurral:
+    container_name: aurral
+    image: ghcr.io/lklynet/aurral:latest
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - DOWNLOAD_FOLDER=/data/music/singles
+      - TRUST_PROXY=1
+    volumes:
+      - /opt/jellyfin/music/singles:/app/downloads
+      - ./aurral/data:/app/backend/data
+    networks:
+      - arr-net
+    depends_on:
+      lidarr:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3001/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  tailscale-aurral:
+    container_name: tailscale-aurral
+    profiles: ["aurral", "all"]
+    image: tailscale/tailscale:latest
+    hostname: aurral-ts
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY_AURRAL}
+      - TS_AUTH_ONCE=true
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_HOSTNAME=aurral
+      - TS_USERSPACE=false
+    volumes:
+      - ./tailscale-aurral/state:/var/lib/tailscale
+      - ./tailscale-aurral/config:/config
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    networks:
+      - arr-net
+    restart: unless-stopped
+    depends_on:
+      aurral:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    command: >
+      sh -c "sleep 10 && /usr/local/bin/containerboot"
+
+  soularr:
+    container_name: soularr
+    image: mrusse08/soularr:latest
+    user: "1000:1000"
+    environment:
+      - TZ=Europe/London
+      - SCRIPT_INTERVAL=300
+      - LIDARR_API_KEY=${LIDARR_API_KEY}
+      - SLSKD_API_KEY=${SLSKD_API_KEY}
+    volumes:
+      - /opt/jellyfin:/data
+      - ./soularr/config.ini.template:/data/config.ini.template:ro
+      - ./scripts/soularr-entrypoint.sh:/soularr-entrypoint.sh:ro
+    entrypoint: ["/soularr-entrypoint.sh"]
+    networks:
+      - arr-net
+    restart: unless-stopped
+
+networks:
+  arr-net:
+    driver: bridge

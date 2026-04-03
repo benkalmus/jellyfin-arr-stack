@@ -1,0 +1,22 @@
+remote_configuration: false
+
+directories:
+  incomplete: /data/downloads/incomplete
+  downloads: /data/music/singles
+
+soulseek:
+  address: vps.slsknet.org
+  port: 2271
+  username: __SLSKD_USERNAME__
+  password: __SLSKD_SOULSEEK_PASS__
+
+web:
+  port: 5030
+  https:
+    disabled: true
+  authentication:
+    disabled: false
+    username: slskd
+    password: __SLSKD_WEB_PASSWORD__
+    api_keys:
+      soularr: __SLSKD_API_KEY__
